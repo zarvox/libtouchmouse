@@ -28,7 +28,8 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libusb-1.0/libusb.h>
+#include "hidapi.h"
+#include <stdint.h>
 
 int quit = 0;
 
@@ -201,29 +202,22 @@ int process_nybble(decoder* state, uint8_t nybble) {
 	return DECODER_IN_PROGRESS;
 }
 
-int enable_mouse_image_mode(libusb_device_handle* dev) {
+int enable_mouse_image_mode(hid_device* dev) {
 	// We need to set two bits in a particular Feature report.  We first fetch
 	// the current state of the feature report, set the interesting bits, and
 	// write that feature report back to the device.
 	printf("Reading current config flags\n");
-	unsigned char data[256] = {0};
+	unsigned char data[27] = {0x22};
 	int transferred = 0;
-	transferred = libusb_control_transfer(dev,
-			0xa1,  // bmRequestType = IN, Class
-			0x01,  // GET_REPORT
-			0x322, // wValue = 0x0322 -> Feature, id 0x22 = 34
-			0x02,  // wIndex = 2: endpoint 3
-			data,  // buffer for data
-			0x1B,  // expect 27 bytes reply
-			0      // infinite timeout
-			);
-
-	printf("%d bytes received:\n", transferred);
-	int i;
-	for(i = 0; i < transferred; i++) {
-		printf("%02X ", data[i]);
+	transferred = hid_get_feature_report(dev, data, 27);
+	if (transferred > 0) {
+		printf("%d bytes received:\n", transferred);
+		int i;
+		for(i = 0; i < transferred; i++) {
+			printf("%02X ", data[i]);
+		}
+		printf("\n");
 	}
-	printf("\n");
 	if (transferred != 0x1B) {
 		printf("Failed to read Feature 0x22 correctly; expected 27 bytes, got %d\n", transferred);
 		return -1;
@@ -234,15 +228,7 @@ int enable_mouse_image_mode(libusb_device_handle* dev) {
 	data[4] = 0x06;
 
 	printf("Trying to enable full touch updates...\n");
-	transferred = libusb_control_transfer(dev,
-			0x21,  // bmRequestType = OUT, Class
-			0x09,  // SET_REPORT
-			0x322, // wValue = 0x0322 -> Feature, id 0x22 = 34
-			0x02,  // wIndex = 2: endpoint 3
-			data,  // buffer for data
-			0x1B,  // nBytes
-			0      // infinite timeout
-			);
+	transferred = hid_send_feature_report(dev, data, 27);
 	printf("Wrote %d bytes\n", transferred);
 	if (transferred == 0x1B) {
 		printf("Successfully enabled full touch updates.\n");
@@ -255,37 +241,29 @@ int enable_mouse_image_mode(libusb_device_handle* dev) {
 int main(void) {
 	signal(SIGINT, handler);
 
-	libusb_context *ctx;
-	libusb_device_handle *dev;
-	int res = 0;
+	hid_device *dev;
+	struct hid_device_info *devs, *cur_dev;
 
-	libusb_init(&ctx);
-
-	dev = libusb_open_device_with_vid_pid(ctx, 0x045e, 0x0773);
-	if (!dev) {
-		printf("Failed to open device, aborting\n");
-		return -1;
-	}
-
-	res = libusb_kernel_driver_active(dev, 2);
-	if (res == 1) {
-		printf("Kernel driver active, will try to detach\n");
-		res = libusb_detach_kernel_driver(dev, 2);
-		if (res < 0) {
-			printf("Failed to detach kernel driver, aborting: %d\n", res);
-			return -1;
+	// Open HID device.
+	char* path = NULL;
+	devs = hid_enumerate(0x0, 0x0);
+	cur_dev = devs;
+	while(cur_dev) {
+		if (cur_dev->vendor_id == 0x045e && cur_dev->product_id == 0x0773 && cur_dev->interface_number == 2) {
+			path = cur_dev->path;
+			break;
 		}
-	} else if (res < 0) {
-		printf("Something unlikely happened in libusb_kernel_driver_active(): %d\n", res);
+		cur_dev = cur_dev->next;
+	}
+	if (!path) {
+		printf("Couldn't find TouchMouse, aborting\n");
 		return -1;
 	}
+	dev = hid_open_path(path);
+	hid_free_enumeration(devs);
 
-	res = libusb_claim_interface(dev, 2);
-	if (res < 0) {
-		printf("Failed to claim interface 2 on device (error %d), aborting\n", res);
-		return -1;
-	}
-
+	// Enable image updates
+	int res = 0;
 	res = enable_mouse_image_mode(dev);
 	if (res != 0) {
 		printf("Failed to enable full touch updates, aborting\n");
@@ -299,30 +277,27 @@ int main(void) {
 
 	uint8_t last_timestamp = 0;
 
+	// Poll for updates.
 	unsigned char data[256] = {};
-	int transferred = 0;
-	printf("polling for interrupts...\n");
+	printf("polling for image updates...\n");
+	hid_set_nonblocking(dev, 1); // Enable nonblocking reads
 	while(!quit) {
-		res = libusb_interrupt_transfer(dev,
-				0x83, // Endpoint 0x83
-				data, // pointer to data
-				0x20, // Expected transfer length (32 bytes)
-				&transferred, // pointer to number of bytes actually transferred
-				1000);   // 1 second timeout so we can respond to ^C
-		if (res < 0 && res != LIBUSB_ERROR_TIMEOUT) {
-			printf("Interrupt transfer failed: %d\n", res);
-		} else if (res == 0) {
+		res = hid_read_timeout(dev, data, 255, 100); // 100 msec is hardly noticable, but keeps us from pegging a CPU core
+		if (res < 0 ) {
+			printf("hid_read() failed: %d\n", res);
+			return -1;
+		} else if (res > 0) {
 			// Dump contents of transfer
-			printf("Got reply: %d bytes:", transferred);
+			printf("Got reply: %d bytes:", res);
 			int j;
-			for(j = 0; j < transferred; j++) {
+			for(j = 0; j < res; j++) {
 				printf(" %02X", data[j]);
 			}
 			printf("\n");
 			// Interpret contents.
 			report* r = (report*)data;
 			// We only care about report ID 39 (0x27), which should be 32 bytes long
-			if (transferred == 32 && r->report_id == 0x27) {
+			if (res == 32 && r->report_id == 0x27) {
 				printf("Timestamp: %02X\t%02X bytes:", r->timestamp, r->length - 1);
 				int t;
 				for(t = 0; t < r->length - 1; t++) {
@@ -361,8 +336,8 @@ int main(void) {
 		}
 	}
 cleanup:
-	libusb_close(dev);
+	hid_close(dev);
 	dev = NULL;
-	libusb_exit(ctx);
-	ctx = NULL;
+	hid_exit();
+	return 0;
 }
