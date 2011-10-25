@@ -247,7 +247,7 @@ int main(void) {
 
 	// Open HID device.
 	char* path = NULL;
-	devs = hid_enumerate(0x0, 0x0);
+	devs = hid_enumerate(0x045e, 0x0773); // 0x045e = Microsoft, 0x0773 = TouchMouse
 	cur_dev = devs;
 	while(cur_dev) {
 		if (cur_dev->vendor_id == 0x045e && cur_dev->product_id == 0x0773 && cur_dev->interface_number == 2) {
