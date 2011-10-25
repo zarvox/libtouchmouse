@@ -141,7 +141,7 @@ enum {
 int process_nybble(decoder* state, uint8_t nybble) {
 	//printf("process_nybble: buf_index = %d\t%01x\n", state->buf_index, nybble);
 	if (nybble >= 16) {
-		printf("process_nybble: got nybble >= 16, wtf: %d\n", nybble);
+		fprintf(stderr, "process_nybble: got nybble >= 16, wtf: %d\n", nybble);
 		return DECODER_ERROR;
 	}
 	if (state->next_is_run_encoded) {
@@ -149,6 +149,7 @@ int process_nybble(decoder* state, uint8_t nybble) {
 		if (state->buf_index + nybble + 3 > 181) {
 			// Completing this decode would overrun the buffer.  We've been
 			// given invalid data.  Abort.
+			fprintf(stderr, "process_nybble: run encoded would overflow buffer: got 0xF%x (%d zeros) with only %d bytes to fill in buffer\n", nybble, nybble + 3, 181 - state->buf_index);
 			return DECODER_ERROR;
 		}
 		int i;
@@ -219,7 +220,7 @@ int enable_mouse_image_mode(hid_device* dev) {
 		printf("\n");
 	}
 	if (transferred != 0x1B) {
-		printf("Failed to read Feature 0x22 correctly; expected 27 bytes, got %d\n", transferred);
+		fprintf(stderr, "Failed to read Feature 0x22 correctly; expected 27 bytes, got %d\n", transferred);
 		return -1;
 	}
 
@@ -234,7 +235,7 @@ int enable_mouse_image_mode(hid_device* dev) {
 		printf("Successfully enabled full touch updates.\n");
 		return 0;
 	}
-	printf("Failed to enable full touch updates.\n");
+	fprintf(stderr, "Failed to enable full touch updates.\n");
 	return -1;
 }
 
@@ -256,17 +257,21 @@ int main(void) {
 		cur_dev = cur_dev->next;
 	}
 	if (!path) {
-		printf("Couldn't find TouchMouse, aborting\n");
+		fprintf(stderr, "Couldn't find TouchMouse, aborting\n");
 		return -1;
 	}
 	dev = hid_open_path(path);
+	if (!dev) {
+		fprintf(stderr, "Failed to open device %s, aborting\n", path);
+		return -1;
+	}
 	hid_free_enumeration(devs);
 
 	// Enable image updates
 	int res = 0;
 	res = enable_mouse_image_mode(dev);
 	if (res != 0) {
-		printf("Failed to enable full touch updates, aborting\n");
+		fprintf(stderr, "Failed to enable full touch updates, aborting\n");
 		return -1;
 	}
 
@@ -284,7 +289,7 @@ int main(void) {
 	while(!quit) {
 		res = hid_read_timeout(dev, data, 255, 100); // 100 msec is hardly noticable, but keeps us from pegging a CPU core
 		if (res < 0 ) {
-			printf("hid_read() failed: %d\n", res);
+			fprintf(stderr, "hid_read() failed: %d\n", res);
 			return -1;
 		} else if (res > 0) {
 			// Dump contents of transfer
@@ -318,7 +323,7 @@ int main(void) {
 						break;
 					}
 					if (res == DECODER_ERROR) {
-						printf("Caught error in decoder, aborting!\n");
+						fprintf(stderr, "Caught error in decoder, aborting!\n");
 						goto cleanup;
 					}
 					res = process_nybble(state, (r->data[t] & 0xf0) >> 4);
@@ -328,7 +333,7 @@ int main(void) {
 						break;
 					}
 					if (res == DECODER_ERROR) {
-						printf("Caught error in decoder, aborting!\n");
+						fprintf(stderr, "Caught error in decoder, aborting!\n");
 						goto cleanup;
 					}
 				}
