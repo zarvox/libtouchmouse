@@ -250,7 +250,26 @@ int main(void) {
 	devs = hid_enumerate(0x045e, 0x0773); // 0x045e = Microsoft, 0x0773 = TouchMouse
 	cur_dev = devs;
 	while(cur_dev) {
-		if (cur_dev->vendor_id == 0x045e && cur_dev->product_id == 0x0773 && cur_dev->interface_number == 2) {
+		printf("Examining device: %s\n", cur_dev->path);
+		printf("\tVendor  ID: %04x\n", cur_dev->vendor_id);
+		printf("\tProduct ID: %04x\n", cur_dev->product_id);
+		printf("\tSerial num: %ls\n", cur_dev->serial_number);
+		printf("\tRelease #:  %d\n", cur_dev->release_number);
+		printf("\tManuf. Str: %ls\n", cur_dev->manufacturer_string);
+		printf("\tProd.  Str: %ls\n", cur_dev->product_string);
+		printf("\tUsage Page: %02x\n", cur_dev->usage_page);
+		printf("\tUsage     : %02x\n", cur_dev->usage);
+		printf("\tInterface:  %d\n", cur_dev->interface_number);
+#ifdef __APPLE__
+		// This method of detection should work on both OSX and Windows.
+		if (cur_dev->usage_page == 0x0c && cur_dev->usage == 0x01)
+#else
+		// This method of detection should work on Linux and Windows.
+		// Pity there's no single way to uniquely ID the device.
+		if (cur_dev->interface_number == 2)
+#endif
+		{
+			printf("Found TouchMouse: %s\n", cur_dev->path);
 			path = cur_dev->path;
 			break;
 		}
