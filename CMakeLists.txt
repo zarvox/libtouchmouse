@@ -4,8 +4,9 @@ cmake_minimum_required(VERSION 2.6)
 
 project(libtouchmouse)
 
-# Set up output folder
+# Set up output folders
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
+set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)
 
 # Add include path to hidapi.h
 include_directories (${CMAKE_CURRENT_SOURCE_DIR}/hidapi/hidapi ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
@@ -36,6 +37,7 @@ add_library(touchmouse SHARED ${LIBSRC})
 # Build demo
 add_executable(consoledemo examples/consoledemo.c)
 if(WIN32)
+	target_link_libraries(touchmouse setupapi)
 	target_link_libraries(consoledemo touchmouse setupapi)
 elseif(NOT APPLE)
 	target_link_libraries(consoledemo touchmouse usb-1.0 pthread rt)
