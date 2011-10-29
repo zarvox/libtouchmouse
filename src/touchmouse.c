@@ -25,19 +25,12 @@
  * or implied, of the copyright holder.
 */
 #include <stdio.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include "hidapi.h"
 #include <stdint.h>
 
-int quit = 0;
-
-// A signal handler so we can ^C cleanly
-void handler(int signum) {
-	printf("Caught signal, quitting\n");
-	quit = 1;
-}
+#include "touchmouse-internal.h"
 
 #pragma pack(1)
 //  The USB HID reports that contain our data are always 32 bytes, with the
@@ -47,7 +40,7 @@ typedef struct {
 	                   //   ones that have report_id 0x27.
 	uint8_t length;    // Length of the useful data in this transfer, including
 	                   //   both timestamp and data[] buffer.
-	uint32_t magic;    // Four magic bytes.  These are always the same:
+	uint8_t magic[4];  // Four magic bytes.  These are always the same:
 	                   //   0x14 0x01 0x00 0x51
 	uint8_t timestamp; // Measured in milliseconds since the last series of
 	                   //   touch events began, but wraps at 256.  If two or
@@ -95,50 +88,20 @@ typedef struct {
 //  Note that the usable touch area on the mouse may be even smaller than this 181
 //  pixel arrangement - some of even these pixels may always give a value of 0.
 
-typedef void (*touchmouse_callback)(void* dev, uint8_t* image, uint8_t timestamp);
-
-// Tracks internal state of the decoder
-typedef struct {
-	int buf_index;
-	int next_is_run_encoded;
-	uint8_t partial_image[181];
-	uint8_t image[195];
-	touchmouse_callback cb;
-} decoder;
-
-void print_table(void* placeholder, uint8_t* image, uint8_t timestamp) {
-	// Sample callback - simply print out the table.
-	int row;
-	printf("Current touch state:\n");
-	for(row = 0; row < 13 ; row++) {
-		int col;
-		for(col = 0; col < 15; col++) {
-			printf("%02X ", image[row * 15 + col]);
-		}
-		printf("\n");
-	}
-}
-
-void reset_decoder(decoder* state) {
-	// Don't set the callback to NULL.
+static void reset_decoder(touchmouse_device *state)
+{
 	state->buf_index = 0;
 	state->next_is_run_encoded = 0;
-	memset(state->partial_image, 0, 181);
-	memset(state->image, 0, 195);
+	memset(state->partial_image, 0, sizeof(state->partial_image));
+	memset(state->image, 0, sizeof(state->image));
 }
 
 // There are 15 possible values that each pixel can take on, but we'd like to
 // scale them up to the full range of a uint8_t for convenience.
-uint8_t decoder_table[15] = {0, 18, 36, 55, 73, 91, 109, 128, 146, 164, 182, 200, 219, 237, 255 };
+static uint8_t decoder_table[15] = {0, 18, 36, 55, 73, 91, 109, 128, 146, 164, 182, 200, 219, 237, 255 };
 
-enum {
-	DECODER_BEGIN,
-	DECODER_IN_PROGRESS,
-	DECODER_COMPLETE,
-	DECODER_ERROR,
-} decoder_state;
-
-int process_nybble(decoder* state, uint8_t nybble) {
+static int process_nybble(touchmouse_device *state, uint8_t nybble)
+{
 	//printf("process_nybble: buf_index = %d\t%01x\n", state->buf_index, nybble);
 	if (nybble >= 16) {
 		fprintf(stderr, "process_nybble: got nybble >= 16, wtf: %d\n", nybble);
@@ -203,50 +166,28 @@ int process_nybble(decoder* state, uint8_t nybble) {
 	return DECODER_IN_PROGRESS;
 }
 
-int enable_mouse_image_mode(hid_device* dev) {
-	// We need to set two bits in a particular Feature report.  We first fetch
-	// the current state of the feature report, set the interesting bits, and
-	// write that feature report back to the device.
-	printf("Reading current config flags\n");
-	unsigned char data[27] = {0x22};
-	int transferred = 0;
-	transferred = hid_get_feature_report(dev, data, 27);
-	if (transferred > 0) {
-		printf("%d bytes received:\n", transferred);
-		int i;
-		for(i = 0; i < transferred; i++) {
-			printf("%02X ", data[i]);
-		}
-		printf("\n");
-	}
-	if (transferred != 0x1B) {
-		fprintf(stderr, "Failed to read Feature 0x22 correctly; expected 27 bytes, got %d\n", transferred);
-		return -1;
-	}
-
-	// This particular byte/setting appears to control the
-	// "send all the raw input" flag.
-	data[4] = 0x06;
-
-	printf("Trying to enable full touch updates...\n");
-	transferred = hid_send_feature_report(dev, data, 27);
-	printf("Wrote %d bytes\n", transferred);
-	if (transferred == 0x1B) {
-		printf("Successfully enabled full touch updates.\n");
-		return 0;
-	}
-	fprintf(stderr, "Failed to enable full touch updates.\n");
-	return -1;
+// Initialize libtouchmouse.  Which mostly consists of calling hid_init();
+int touchmouse_init(void)
+{
+	return hid_init();
 }
 
-int main(void) {
-	signal(SIGINT, handler);
+// Same thing - clean up
+int touchmouse_shutdown(void)
+{
+	// TODO: add some checking to see if all device handles have been closed,
+	// and try to close them all?  This would involve keeping a list of
+	// currently-open devices.  Not hard.
+	return hid_exit();
+}
 
-	hid_device *dev;
+// Enumeration.
+touchmouse_device_info* touchmouse_enumerate_devices(void)
+{
+	touchmouse_device_info* retval = NULL;
+	touchmouse_device_info** prev_next_pointer = &retval;
 	struct hid_device_info *devs, *cur_dev;
-
-	// Open HID device.
-	char* path = NULL;
+	// Get list of HID devices that match VendorID/ProductID
 	devs = hid_enumerate(0x045e, 0x0773); // 0x045e = Microsoft, 0x0773 = TouchMouse
 	cur_dev = devs;
 	while(cur_dev) {
@@ -270,43 +211,136 @@ int main(void) {
 #endif
 		{
 			printf("Found TouchMouse: %s\n", cur_dev->path);
-			path = cur_dev->path;
-			break;
+			*prev_next_pointer = (touchmouse_device_info*)malloc(sizeof(touchmouse_device_info));
+			memset(*prev_next_pointer, 0, sizeof(**prev_next_pointer));
+			printf("Allocated a touchmouse_device_info at address %p\n", *prev_next_pointer);
+			// We need to save both the pointer to this particular hid_device_info
+			// as well as the one from which it was initially allocated, so we can
+			// free it.
+			// Perhaps this would be better placed in a statically allocated list...
+			struct hid_device_info** pair = (struct hid_device_info**)malloc(2*sizeof(struct hid_device_info*));
+			printf("Allocated two hid_device_info* at address %p\n", pair);
+			(*prev_next_pointer)->opaque = (void*)pair;
+			pair[0] = cur_dev;
+			pair[1] = devs;
+			prev_next_pointer = &((*prev_next_pointer)->next);
 		}
 		cur_dev = cur_dev->next;
 	}
-	if (!path) {
-		fprintf(stderr, "Couldn't find TouchMouse, aborting\n");
+	// If we're about to return NULL, then we'd better free the HID enumeration
+	// handles now, since we'll get no data from the user when they call
+	// touchmouse_free_enumeration(NULL)
+	if (!retval) {
+		printf("Found no devices, so calling hid_free_enumeration()\n");
+		hid_free_enumeration(devs);
+	}
+	return retval;
+}
+
+void touchmouse_free_enumeration(touchmouse_device_info *devs)
+{
+	touchmouse_device_info* prev;
+	if (devs) {
+		hid_free_enumeration(((struct hid_device_info**)devs->opaque)[1]);
+	}
+	while (devs) {
+		prev = devs;
+		devs = devs->next;
+		free(prev->opaque);
+		free(prev);
+	}
+}
+
+
+int touchmouse_open(touchmouse_device **dev, touchmouse_device_info *dev_info)
+{
+	touchmouse_device* t_dev = (touchmouse_device*)malloc(sizeof(touchmouse_device));
+	memset(t_dev, 0, sizeof(touchmouse_device));
+	char* path = ((struct hid_device_info**)dev_info->opaque)[0]->path;
+	t_dev->dev = hid_open_path(path);
+	if (!t_dev->dev) {
+		fprintf(stderr, "hid_open() failed for device with path %s\n", path);
+		free(t_dev);
 		return -1;
 	}
-	dev = hid_open_path(path);
-	if (!dev) {
-		fprintf(stderr, "Failed to open device %s, aborting\n", path);
+	hid_set_nonblocking(t_dev->dev, 1); // Enable nonblocking reads
+	*dev = t_dev;
+	return 0;
+}
+
+int touchmouse_close(touchmouse_device *dev)
+{
+	hid_close(dev->dev);
+	free(dev);
+	return 0;
+}
+
+int touchmouse_set_device_mode(touchmouse_device *dev, touchmouse_mode mode)
+{
+	// We need to set two bits in a particular Feature report.  We first fetch
+	// the current state of the feature report, set the interesting bits, and
+	// write that feature report back to the device.
+	printf("Reading current config flags\n");
+	unsigned char data[27] = {0x22};
+	int transferred = 0;
+	transferred = hid_get_feature_report(dev->dev, data, 27);
+	if (transferred > 0) {
+		printf("%d bytes received:\n", transferred);
+		int i;
+		for(i = 0; i < transferred; i++) {
+			printf("%02X ", data[i]);
+		}
+		printf("\n");
+	}
+	if (transferred != 0x1B) {
+		fprintf(stderr, "Failed to read Feature 0x22 correctly; expected 27 bytes, got %d\n", transferred);
 		return -1;
 	}
-	hid_free_enumeration(devs);
 
-	// Enable image updates
-	int res = 0;
-	res = enable_mouse_image_mode(dev);
-	if (res != 0) {
-		fprintf(stderr, "Failed to enable full touch updates, aborting\n");
-		return -1;
+	// This particular byte/setting appears to control the
+	// "send all the raw input" flag.
+	switch (mode) {
+		case TOUCHMOUSE_DEFAULT:
+			data[4] = 0x00;
+			printf("Trying to disable full touch updates...\n");
+			break;
+		case TOUCHMOUSE_RAW_IMAGE:
+			data[4] = 0x06;
+			printf("Trying to enable full touch updates...\n");
+			break;
 	}
 
-	// Initialize decoder
-	decoder* state = (decoder*)malloc(sizeof(decoder));
-	memset(state, 0, sizeof(*state));
-	state->cb = print_table;
+	transferred = hid_send_feature_report(dev->dev, data, 27);
+	printf("Wrote %d bytes\n", transferred);
+	if (transferred == 0x1B) {
+		printf("Successfully set device mode.\n");
+		return 0;
+	}
+	fprintf(stderr, "Failed to set device mode.\n");
+	return -1;
+}
 
-	uint8_t last_timestamp = 0;
+int touchmouse_set_image_update_callback(touchmouse_device *dev, touchmouse_image_callback callback)
+{
+	dev->cb = callback;
+	return 0;
+}
 
-	// Poll for updates.
+int touchmouse_set_device_userdata(touchmouse_device *dev, void *userdata)
+{
+	dev->userdata = userdata;
+	return 0;
+}
+
+int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) {
 	unsigned char data[256] = {};
-	printf("polling for image updates...\n");
-	hid_set_nonblocking(dev, 1); // Enable nonblocking reads
-	while(!quit) {
-		res = hid_read_timeout(dev, data, 255, 100); // 100 msec is hardly noticable, but keeps us from pegging a CPU core
+	int res;
+	int millisleft = milliseconds;
+	uint8_t first_timestamp_read = 0;
+	uint8_t last_timestamp = 0;
+	while(millisleft) { // TODO: make this TIME_NOT_YET_EXPIRED
+		res = hid_read_timeout(dev->dev, data, 255, millisleft); // TODO: fix this to be
+		// the right number of milliseconds
 		if (res < 0 ) {
 			fprintf(stderr, "hid_read() failed: %d\n", res);
 			return -1;
@@ -328,40 +362,50 @@ int main(void) {
 					printf(" %02X", r->data[t]);
 				}
 				printf("\n");
-				if (r->timestamp != last_timestamp) {
-					reset_decoder(state); // Reset decoder for next transfer
-					last_timestamp = r->timestamp;
+				// Reset the decoder if we've seen one timestamp already from earlier
+				// transfers, and this one doesn't match.
+				if (first_timestamp_read && r->timestamp != last_timestamp) {
+					reset_decoder(dev); // Reset decoder for next transfer
 				}
-				for(t = 0; t < r->length - 1; t++) { // Note that we subtract one byte because the length includes the timestamp byte.
+				first_timestamp_read = 1;
+				last_timestamp = r->timestamp;
+				for(t = 0; t < r->length - 1; t++) { // We subtract one byte because the length includes the timestamp byte.
 					int res;
 					// Yes, we process the low nybble first.  Embedded systems are funny like that.
-					res = process_nybble(state, r->data[t] & 0xf);
+					res = process_nybble(dev, r->data[t] & 0xf);
 					if (res == DECODER_COMPLETE) {
-						state->cb(state, state->image, r->timestamp);
-						reset_decoder(state); // Reset decoder for next transfer
-						break;
+						dev->timestamp_last_completed = r->timestamp;
+						touchmouse_callback_info cbinfo;
+						cbinfo.userdata = dev->userdata;
+						cbinfo.image = dev->image;
+						cbinfo.timestamp = dev->timestamp_last_completed;
+						dev->cb(&cbinfo);
+						reset_decoder(dev); // Reset decoder for next transfer
+						return 0;
 					}
 					if (res == DECODER_ERROR) {
 						fprintf(stderr, "Caught error in decoder, aborting!\n");
-						goto cleanup;
+						return -1;
 					}
-					res = process_nybble(state, (r->data[t] & 0xf0) >> 4);
+					res = process_nybble(dev, (r->data[t] & 0xf0) >> 4);
 					if (res == DECODER_COMPLETE) {
-						state->cb(state, state->image, r->timestamp);
-						reset_decoder(state); // Reset decoder for next transfer
-						break;
+						dev->timestamp_last_completed = r->timestamp;
+						touchmouse_callback_info cbinfo;
+						cbinfo.userdata = dev->userdata;
+						cbinfo.image = dev->image;
+						cbinfo.timestamp = dev->timestamp_last_completed;
+						dev->cb(&cbinfo);
+						reset_decoder(dev); // Reset decoder for next transfer
+						return 0;
 					}
 					if (res == DECODER_ERROR) {
 						fprintf(stderr, "Caught error in decoder, aborting!\n");
-						goto cleanup;
+						return -1;
 					}
 				}
 			}
 		}
 	}
-cleanup:
-	hid_close(dev);
-	dev = NULL;
-	hid_exit();
 	return 0;
 }
+
