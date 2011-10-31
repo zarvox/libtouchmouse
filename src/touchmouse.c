@@ -31,6 +31,7 @@
 #include <stdint.h>
 
 #include "touchmouse-internal.h"
+#include "mono_timer.h"
 
 #pragma pack(1)
 //  The USB HID reports that contain our data are always 32 bytes, with the
@@ -335,12 +336,21 @@ int touchmouse_set_device_userdata(touchmouse_device *dev, void *userdata)
 int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) {
 	unsigned char data[256] = {};
 	int res;
-	int millisleft = milliseconds;
 	uint8_t first_timestamp_read = 0;
 	uint8_t last_timestamp = 0;
-	while(millisleft) { // TODO: make this TIME_NOT_YET_EXPIRED
-		res = hid_read_timeout(dev->dev, data, 255, millisleft); // TODO: fix this to be
-		// the right number of milliseconds
+	uint64_t deadline;
+	if(milliseconds == -1) {
+		deadline = (uint64_t)(-1);
+	} else {
+		deadline = mono_timer_nanos() + (milliseconds * 1000000);
+	}
+	uint64_t nanos = mono_timer_nanos();
+	if (nanos == 0 || deadline == 0) {
+		fprintf(stderr, "timer function returned an error, erroring out since we have no timer\n");
+		return -1;
+	}
+	do {
+		res = hid_read_timeout(dev->dev, data, 255, (deadline - nanos) / 1000000 );
 		if (res < 0 ) {
 			fprintf(stderr, "hid_read() failed: %d\n", res);
 			return -1;
@@ -405,7 +415,8 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 				}
 			}
 		}
-	}
+		nanos = mono_timer_nanos();
+	} while(nanos < deadline);
 	return 0;
 }
 

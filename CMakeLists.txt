@@ -28,7 +28,7 @@ else()
 	include_directories(/usr/include/libusb-1.0)
 	list(APPEND LIBSRC hidapi/linux/hid-libusb.c)
 endif()
-list(APPEND LIBSRC src/touchmouse.c)
+list(APPEND LIBSRC src/touchmouse.c src/mono_timer.c)
 
 set(CMAKE_C_FLAGS "-Wall -ggdb")
 
