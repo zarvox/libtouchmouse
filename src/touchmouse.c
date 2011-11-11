@@ -341,6 +341,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 	uint64_t deadline;
 	if(milliseconds == -1) {
 		deadline = (uint64_t)(-1);
+		printf("Got infinite timeout\n");
 	} else {
 		deadline = mono_timer_nanos() + (milliseconds * 1000000);
 	}
@@ -353,25 +354,25 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 		res = hid_read_timeout(dev->dev, data, 255, (deadline - nanos) / 1000000 );
 		if (res < 0 ) {
 			fprintf(stderr, "hid_read() failed: %d\n", res);
-			return -1;
+			return -2;
 		} else if (res > 0) {
 			// Dump contents of transfer
-			printf("Got reply: %d bytes:", res);
-			int j;
-			for(j = 0; j < res; j++) {
-				printf(" %02X", data[j]);
-			}
-			printf("\n");
+			//printf("Got reply: %d bytes:", res);
+			//int j;
+			//for(j = 0; j < res; j++) {
+			//	printf(" %02X", data[j]);
+			//}
+			//printf("\n");
 			// Interpret contents.
 			report* r = (report*)data;
 			// We only care about report ID 39 (0x27), which should be 32 bytes long
 			if (res == 32 && r->report_id == 0x27) {
-				printf("Timestamp: %02X\t%02X bytes:", r->timestamp, r->length - 1);
+				//printf("Timestamp: %02X\t%02X bytes:", r->timestamp, r->length - 1);
 				int t;
-				for(t = 0; t < r->length - 1; t++) {
-					printf(" %02X", r->data[t]);
-				}
-				printf("\n");
+				//for(t = 0; t < r->length - 1; t++) {
+				//	printf(" %02X", r->data[t]);
+				//}
+				//printf("\n");
 				// Reset the decoder if we've seen one timestamp already from earlier
 				// transfers, and this one doesn't match.
 				if (first_timestamp_read && r->timestamp != last_timestamp) {
@@ -394,7 +395,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 						return 0;
 					}
 					if (res == DECODER_ERROR) {
-						fprintf(stderr, "Caught error in decoder, aborting!\n");
+						fprintf(stderr, "Caught error in decoder, aborting decode!\n");
 						reset_decoder(dev);
 						return -1;
 					}
@@ -410,7 +411,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 						return 0;
 					}
 					if (res == DECODER_ERROR) {
-						fprintf(stderr, "Caught error in decoder, aborting!\n");
+						fprintf(stderr, "Caught error in decoder, aborting decode!\n");
 						reset_decoder(dev);
 						return -1;
 					}

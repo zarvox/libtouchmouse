@@ -13,6 +13,10 @@
 	#endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Types:
 struct touchmouse_device_;
 typedef struct touchmouse_device_ touchmouse_device;
@@ -64,5 +68,9 @@ TOUCHMOUSEAPI int touchmouse_set_device_userdata(touchmouse_device *dev, void *u
 // milliseconds = 0 means "trigger the callback if you have the data waiting, otherwise request data async and return immediately"
 // milliseconds > 0 means "fetch data.  Trigger a callback if the data arrives within <arg> milliseconds, otherwise return."
 TOUCHMOUSEAPI int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __LIBTOUCHMOUSE_H__ */

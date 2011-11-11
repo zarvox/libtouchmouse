@@ -81,7 +81,7 @@ int main(void) {
 	}
 
 	// Poll device for image updates.
-	int i;
+	int i = 0;
 	while(i < 100) {
 		res = touchmouse_process_events_timeout(dev, -1); // -1 means infinite timeout
 		i++;

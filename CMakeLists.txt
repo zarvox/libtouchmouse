@@ -35,13 +35,10 @@ set(CMAKE_C_FLAGS "-Wall -ggdb")
 # Build library
 add_library(touchmouse SHARED ${LIBSRC})
 
-# Build demo
-add_executable(consoledemo examples/consoledemo.c)
 if(WIN32)
 	target_link_libraries(touchmouse setupapi)
-	target_link_libraries(consoledemo touchmouse setupapi)
-elseif(NOT APPLE)
-	target_link_libraries(consoledemo touchmouse usb-1.0 pthread rt)
-else()
-	target_link_libraries(consoledemo touchmouse)
 endif()
+
+# Build examples
+add_subdirectory(examples)
+
