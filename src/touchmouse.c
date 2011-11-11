@@ -395,6 +395,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 					}
 					if (res == DECODER_ERROR) {
 						fprintf(stderr, "Caught error in decoder, aborting!\n");
+						reset_decoder(dev);
 						return -1;
 					}
 					res = process_nybble(dev, (r->data[t] & 0xf0) >> 4);
@@ -410,6 +411,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 					}
 					if (res == DECODER_ERROR) {
 						fprintf(stderr, "Caught error in decoder, aborting!\n");
+						reset_decoder(dev);
 						return -1;
 					}
 				}
