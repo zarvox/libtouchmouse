@@ -16,6 +16,7 @@ if(WIN32)
 	# Win32-specific options go here.
 	message(STATUS "Detected Win32 system")
 	list(APPEND LIBSRC hidapi/windows/hid.c)
+	list(APPEND PLATFORM_LIBS setupapi)
 elseif(APPLE)
 	# Apple-specific options go here.
 	message(STATUS "Detected Apple system")
@@ -27,6 +28,7 @@ else()
 	message(STATUS "Detected non-windows, non-apple system; assuming some Linux variant")
 	include_directories(/usr/include/libusb-1.0)
 	list(APPEND LIBSRC hidapi/linux/hid-libusb.c)
+	list(APPEND PLATFORM_LIBS usb-1.0 pthread rt)
 endif()
 list(APPEND LIBSRC src/touchmouse.c src/mono_timer.c)
 
