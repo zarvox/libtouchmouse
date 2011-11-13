@@ -11,6 +11,7 @@ struct touchmouse_device_ {
 	touchmouse_image_callback cb;
 	// Image decoder/reassembler state
 	uint8_t timestamp_last_completed;
+	uint8_t timestamp_in_progress;
 	int buf_index;
 	int next_is_run_encoded;
 	uint8_t partial_image[181];

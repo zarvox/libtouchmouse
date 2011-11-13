@@ -113,7 +113,7 @@ static int process_nybble(touchmouse_device *state, uint8_t nybble)
 		if (state->buf_index + nybble + 3 > 181) {
 			// Completing this decode would overrun the buffer.  We've been
 			// given invalid data.  Abort.
-			fprintf(stderr, "process_nybble: run encoded would overflow buffer: got 0xF%x (%d zeros) with only %d bytes to fill in buffer\n", nybble, nybble + 3, 181 - state->buf_index);
+			fprintf(stderr, "process_nybble: run encoded would overflow buffer: got 0xF%X (%d zeros) with only %d bytes to fill in buffer\n", nybble, nybble + 3, 181 - state->buf_index);
 			return DECODER_ERROR;
 		}
 		int i;
@@ -336,12 +336,9 @@ int touchmouse_set_device_userdata(touchmouse_device *dev, void *userdata)
 int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) {
 	unsigned char data[256] = {};
 	int res;
-	uint8_t first_timestamp_read = 0;
-	uint8_t last_timestamp = 0;
 	uint64_t deadline;
 	if(milliseconds == -1) {
 		deadline = (uint64_t)(-1);
-		printf("Got infinite timeout\n");
 	} else {
 		deadline = mono_timer_nanos() + (milliseconds * 1000000);
 	}
@@ -375,11 +372,10 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 				//printf("\n");
 				// Reset the decoder if we've seen one timestamp already from earlier
 				// transfers, and this one doesn't match.
-				if (first_timestamp_read && r->timestamp != last_timestamp) {
+				if (dev->buf_index != 0 && r->timestamp != dev->timestamp_in_progress) {
 					reset_decoder(dev); // Reset decoder for next transfer
 				}
-				first_timestamp_read = 1;
-				last_timestamp = r->timestamp;
+				dev->timestamp_in_progress = r->timestamp;
 				for(t = 0; t < r->length - 1; t++) { // We subtract one byte because the length includes the timestamp byte.
 					int res;
 					// Yes, we process the low nybble first.  Embedded systems are funny like that.
