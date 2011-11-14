@@ -38,7 +38,7 @@ set(CMAKE_C_FLAGS "-Wall -ggdb")
 add_library(touchmouse SHARED ${LIBSRC})
 
 if(WIN32)
-	target_link_libraries(touchmouse setupapi)
+	target_link_libraries(touchmouse ${PLATFORM_LIBS})
 endif()
 
 # Build examples
