@@ -337,7 +337,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 	unsigned char data[256] = {};
 	int res;
 	uint64_t deadline;
-	if(milliseconds == -1) {
+	if(milliseconds < 0) {
 		deadline = (uint64_t)(-1);
 	} else {
 		deadline = mono_timer_nanos() + (milliseconds * 1000000);
