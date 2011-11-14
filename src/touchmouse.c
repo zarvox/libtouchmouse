@@ -29,9 +29,12 @@
 #include <string.h>
 #include "hidapi.h"
 #include <stdint.h>
+#include <stdarg.h>
 
 #include "touchmouse-internal.h"
 #include "mono_timer.h"
+
+static touchmouse_loglevel touchmouse_current_loglevel = TOUCHMOUSE_LOG_INFO;
 
 #pragma pack(1)
 //  The USB HID reports that contain our data are always 32 bytes, with the
@@ -103,9 +106,9 @@ static uint8_t decoder_table[15] = {0, 18, 36, 55, 73, 91, 109, 128, 146, 164, 1
 
 static int process_nybble(touchmouse_device *state, uint8_t nybble)
 {
-	//printf("process_nybble: buf_index = %d\t%01x\n", state->buf_index, nybble);
+	TM_FLOOD("process_nybble: buf_index = %d\t%01x\n", state->buf_index, nybble);
 	if (nybble >= 16) {
-		fprintf(stderr, "process_nybble: got nybble >= 16, wtf: %d\n", nybble);
+		TM_ERROR("process_nybble: got nybble >= 16, wtf: %d\n", nybble);
 		return DECODER_ERROR;
 	}
 	if (state->next_is_run_encoded) {
@@ -113,7 +116,7 @@ static int process_nybble(touchmouse_device *state, uint8_t nybble)
 		if (state->buf_index + nybble + 3 > 181) {
 			// Completing this decode would overrun the buffer.  We've been
 			// given invalid data.  Abort.
-			fprintf(stderr, "process_nybble: run encoded would overflow buffer: got 0xF%X (%d zeros) with only %d bytes to fill in buffer\n", nybble, nybble + 3, 181 - state->buf_index);
+			TM_ERROR("process_nybble: run encoded would overflow buffer: got 0xF%X (%d zeros) with only %d bytes to fill in buffer\n", nybble, nybble + 3, 181 - state->buf_index);
 			return DECODER_ERROR;
 		}
 		int i;
@@ -182,9 +185,29 @@ int touchmouse_shutdown(void)
 	return hid_exit();
 }
 
+// Set global log level.  This should probably be pushed down into contexts,
+// but HIDAPI doesn't support contexts. :(
+void touchmouse_set_log_level(touchmouse_loglevel level)
+{
+	touchmouse_current_loglevel = level;
+}
+
+// Emit a log message at the specified loglevel.  If the current loglevel is
+// lower than the one specified, do nothing.
+void tm_log(touchmouse_loglevel level, const char *fmt, ...)
+{
+	va_list args;
+	if (level > touchmouse_current_loglevel)
+		return;
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+}
+
 // Enumeration.
 touchmouse_device_info* touchmouse_enumerate_devices(void)
 {
+	TM_SPEW("touchmouse_enumerate_devices: Enumerating HIDAPI devices\n");
 	touchmouse_device_info* retval = NULL;
 	touchmouse_device_info** prev_next_pointer = &retval;
 	struct hid_device_info *devs, *cur_dev;
@@ -192,16 +215,16 @@ touchmouse_device_info* touchmouse_enumerate_devices(void)
 	devs = hid_enumerate(0x045e, 0x0773); // 0x045e = Microsoft, 0x0773 = TouchMouse
 	cur_dev = devs;
 	while(cur_dev) {
-		printf("Examining device: %s\n", cur_dev->path);
-		printf("\tVendor  ID: %04x\n", cur_dev->vendor_id);
-		printf("\tProduct ID: %04x\n", cur_dev->product_id);
-		printf("\tSerial num: %ls\n", cur_dev->serial_number);
-		printf("\tRelease #:  %d\n", cur_dev->release_number);
-		printf("\tManuf. Str: %ls\n", cur_dev->manufacturer_string);
-		printf("\tProd.  Str: %ls\n", cur_dev->product_string);
-		printf("\tUsage Page: %02x\n", cur_dev->usage_page);
-		printf("\tUsage     : %02x\n", cur_dev->usage);
-		printf("\tInterface:  %d\n", cur_dev->interface_number);
+		TM_DEBUG("Examining device: %s\n", cur_dev->path);
+		TM_SPEW("\tVendor  ID: %04x\n", cur_dev->vendor_id);
+		TM_SPEW("\tProduct ID: %04x\n", cur_dev->product_id);
+		TM_SPEW("\tSerial num: %ls\n", cur_dev->serial_number);
+		TM_SPEW("\tRelease #:  %d\n", cur_dev->release_number);
+		TM_SPEW("\tManuf. Str: %ls\n", cur_dev->manufacturer_string);
+		TM_SPEW("\tProd.  Str: %ls\n", cur_dev->product_string);
+		TM_SPEW("\tUsage Page: %02x\n", cur_dev->usage_page);
+		TM_SPEW("\tUsage     : %02x\n", cur_dev->usage);
+		TM_SPEW("\tInterface:  %d\n", cur_dev->interface_number);
 #ifdef __APPLE__
 		// This method of detection should work on both OSX and Windows.
 		if (cur_dev->usage_page == 0x0c && cur_dev->usage == 0x01)
@@ -211,16 +234,16 @@ touchmouse_device_info* touchmouse_enumerate_devices(void)
 		if (cur_dev->interface_number == 2)
 #endif
 		{
-			printf("Found TouchMouse: %s\n", cur_dev->path);
+			TM_DEBUG("Found TouchMouse: %s\n", cur_dev->path);
 			*prev_next_pointer = (touchmouse_device_info*)malloc(sizeof(touchmouse_device_info));
 			memset(*prev_next_pointer, 0, sizeof(**prev_next_pointer));
-			printf("Allocated a touchmouse_device_info at address %p\n", *prev_next_pointer);
+			TM_FLOOD("Allocated a touchmouse_device_info at address %p\n", *prev_next_pointer);
 			// We need to save both the pointer to this particular hid_device_info
 			// as well as the one from which it was initially allocated, so we can
 			// free it.
 			// Perhaps this would be better placed in a statically allocated list...
 			struct hid_device_info** pair = (struct hid_device_info**)malloc(2*sizeof(struct hid_device_info*));
-			printf("Allocated two hid_device_info* at address %p\n", pair);
+			TM_FLOOD("Allocated two hid_device_info* at address %p\n", pair);
 			(*prev_next_pointer)->opaque = (void*)pair;
 			pair[0] = cur_dev;
 			pair[1] = devs;
@@ -232,7 +255,7 @@ touchmouse_device_info* touchmouse_enumerate_devices(void)
 	// handles now, since we'll get no data from the user when they call
 	// touchmouse_free_enumeration(NULL)
 	if (!retval) {
-		printf("Found no devices, so calling hid_free_enumeration()\n");
+		TM_FLOOD("Found no devices, so calling hid_free_enumeration()\n");
 		hid_free_enumeration(devs);
 	}
 	return retval;
@@ -240,6 +263,7 @@ touchmouse_device_info* touchmouse_enumerate_devices(void)
 
 void touchmouse_free_enumeration(touchmouse_device_info *devs)
 {
+	TM_FLOOD("touchmouse_free_enumeration: Freeing touchmouse device list\n");
 	touchmouse_device_info* prev;
 	if (devs) {
 		hid_free_enumeration(((struct hid_device_info**)devs->opaque)[1]);
@@ -252,7 +276,6 @@ void touchmouse_free_enumeration(touchmouse_device_info *devs)
 	}
 }
 
-
 int touchmouse_open(touchmouse_device **dev, touchmouse_device_info *dev_info)
 {
 	touchmouse_device* t_dev = (touchmouse_device*)malloc(sizeof(touchmouse_device));
@@ -260,7 +283,7 @@ int touchmouse_open(touchmouse_device **dev, touchmouse_device_info *dev_info)
 	char* path = ((struct hid_device_info**)dev_info->opaque)[0]->path;
 	t_dev->dev = hid_open_path(path);
 	if (!t_dev->dev) {
-		fprintf(stderr, "hid_open() failed for device with path %s\n", path);
+		TM_ERROR("hid_open() failed for device with path %s\n", path);
 		free(t_dev);
 		return -1;
 	}
@@ -281,20 +304,20 @@ int touchmouse_set_device_mode(touchmouse_device *dev, touchmouse_mode mode)
 	// We need to set two bits in a particular Feature report.  We first fetch
 	// the current state of the feature report, set the interesting bits, and
 	// write that feature report back to the device.
-	printf("Reading current config flags\n");
+	TM_SPEW("touchmouse_set_device_mode: Reading current config flags\n");
 	unsigned char data[27] = {0x22};
 	int transferred = 0;
 	transferred = hid_get_feature_report(dev->dev, data, 27);
 	if (transferred > 0) {
-		printf("%d bytes received:\n", transferred);
+		TM_SPEW("%d bytes received:\n", transferred);
 		int i;
 		for(i = 0; i < transferred; i++) {
-			printf("%02X ", data[i]);
+			TM_SPEW("%02X ", data[i]);
 		}
-		printf("\n");
+		TM_SPEW("\n");
 	}
 	if (transferred != 0x1B) {
-		fprintf(stderr, "Failed to read Feature 0x22 correctly; expected 27 bytes, got %d\n", transferred);
+		TM_ERROR("touchmouse_set_device_mode: Failed to read Feature 0x22 correctly; expected 27 bytes, got %d\n", transferred);
 		return -1;
 	}
 
@@ -303,21 +326,21 @@ int touchmouse_set_device_mode(touchmouse_device *dev, touchmouse_mode mode)
 	switch (mode) {
 		case TOUCHMOUSE_DEFAULT:
 			data[4] = 0x00;
-			printf("Trying to disable full touch updates...\n");
+			TM_DEBUG("touchmouse_set_device_mode: Trying to disable full touch updates...\n");
 			break;
 		case TOUCHMOUSE_RAW_IMAGE:
 			data[4] = 0x06;
-			printf("Trying to enable full touch updates...\n");
+			TM_DEBUG("touchmouse_set_device_mode: Trying to enable full touch updates...\n");
 			break;
 	}
 
 	transferred = hid_send_feature_report(dev->dev, data, 27);
-	printf("Wrote %d bytes\n", transferred);
+	TM_SPEW("Wrote %d bytes\n", transferred);
 	if (transferred == 0x1B) {
-		printf("Successfully set device mode.\n");
+		TM_DEBUG("touchmouse_set_device_mode: Successfully set device mode.\n");
 		return 0;
 	}
-	fprintf(stderr, "Failed to set device mode.\n");
+	TM_ERROR("touchmouse_set_device_mode: Failed to set device mode.\n");
 	return -1;
 }
 
@@ -344,35 +367,36 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 	}
 	uint64_t nanos = mono_timer_nanos();
 	if (nanos == 0 || deadline == 0) {
-		fprintf(stderr, "timer function returned an error, erroring out since we have no timer\n");
+		TM_FATAL("touchmouse_process_events_timeout: timer function returned an error, erroring out since we have no timer\n");
 		return -1;
 	}
 	do {
 		res = hid_read_timeout(dev->dev, data, 255, (deadline - nanos) / 1000000 );
 		if (res < 0 ) {
-			fprintf(stderr, "hid_read() failed: %d\n", res);
+			TM_ERROR("hid_read() failed: %d - %ls\n", res, hid_error(dev->dev));
 			return -2;
 		} else if (res > 0) {
 			// Dump contents of transfer
-			//printf("Got reply: %d bytes:", res);
-			//int j;
-			//for(j = 0; j < res; j++) {
-			//	printf(" %02X", data[j]);
-			//}
-			//printf("\n");
+			TM_SPEW("touchmouse_process_events_timeout: got report: %d bytes:", res);
+			int j;
+			for(j = 0; j < res; j++) {
+				TM_SPEW(" %02X", data[j]);
+			}
+			TM_SPEW("\n");
 			// Interpret contents.
 			report* r = (report*)data;
 			// We only care about report ID 39 (0x27), which should be 32 bytes long
 			if (res == 32 && r->report_id == 0x27) {
-				//printf("Timestamp: %02X\t%02X bytes:", r->timestamp, r->length - 1);
+				TM_FLOOD("Timestamp: %02X\t%02X bytes:", r->timestamp, r->length - 1);
 				int t;
-				//for(t = 0; t < r->length - 1; t++) {
-				//	printf(" %02X", r->data[t]);
-				//}
-				//printf("\n");
+				for(t = 0; t < r->length - 1; t++) {
+					TM_FLOOD(" %02X", r->data[t]);
+				}
+				TM_FLOOD("\n");
 				// Reset the decoder if we've seen one timestamp already from earlier
 				// transfers, and this one doesn't match.
 				if (dev->buf_index != 0 && r->timestamp != dev->timestamp_in_progress) {
+					TM_FLOOD("touchmouse_process_events_timeout: timestamps don't match: got %d, expected %d\n", r->timestamp, dev->timestamp_in_progress);
 					reset_decoder(dev); // Reset decoder for next transfer
 				}
 				dev->timestamp_in_progress = r->timestamp;
@@ -381,6 +405,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 					// Yes, we process the low nybble first.  Embedded systems are funny like that.
 					res = process_nybble(dev, r->data[t] & 0xf);
 					if (res == DECODER_COMPLETE) {
+						TM_SPEW("Frame completed, triggering callback\n");
 						dev->timestamp_last_completed = r->timestamp;
 						touchmouse_callback_info cbinfo;
 						cbinfo.userdata = dev->userdata;
@@ -391,12 +416,13 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 						return 0;
 					}
 					if (res == DECODER_ERROR) {
-						fprintf(stderr, "Caught error in decoder, aborting decode!\n");
+						TM_ERROR("Caught error in decoder, aborting decode!\n");
 						reset_decoder(dev);
 						return -1;
 					}
 					res = process_nybble(dev, (r->data[t] & 0xf0) >> 4);
 					if (res == DECODER_COMPLETE) {
+						TM_SPEW("Frame completed, triggering callback\n");
 						dev->timestamp_last_completed = r->timestamp;
 						touchmouse_callback_info cbinfo;
 						cbinfo.userdata = dev->userdata;
@@ -407,7 +433,7 @@ int touchmouse_process_events_timeout(touchmouse_device *dev, int milliseconds) 
 						return 0;
 					}
 					if (res == DECODER_ERROR) {
-						fprintf(stderr, "Caught error in decoder, aborting decode!\n");
+						TM_ERROR("Caught error in decoder, aborting decode!\n");
 						reset_decoder(dev);
 						return -1;
 					}

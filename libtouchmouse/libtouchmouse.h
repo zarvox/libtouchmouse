@@ -44,9 +44,23 @@ typedef enum {
 	// Other modes may exist, I haven't played with the mouse enough yet.
 } touchmouse_mode;
 
+typedef enum {
+	TOUCHMOUSE_LOG_FATAL = 0, /**< Log level for crashing/non-recoverable errors */
+	TOUCHMOUSE_LOG_ERROR,     /**< Log level for major errors */
+	TOUCHMOUSE_LOG_WARNING,   /**< Log level for warning messages */
+	TOUCHMOUSE_LOG_NOTICE,    /**< Log level for important messages */
+	TOUCHMOUSE_LOG_INFO,      /**< Log level for normal messages */
+	TOUCHMOUSE_LOG_DEBUG,     /**< Log level for useful development messages */
+	TOUCHMOUSE_LOG_SPEW,      /**< Log level for slightly less useful messages */
+	TOUCHMOUSE_LOG_FLOOD,     /**< Log level for EVERYTHING. May significantly slow performance. */
+} touchmouse_loglevel;
+
 // Library initialization/destruction
 TOUCHMOUSEAPI int touchmouse_init(void);
 TOUCHMOUSEAPI int touchmouse_shutdown(void);
+
+// Library logging verbosity
+TOUCHMOUSEAPI void touchmouse_set_log_level(touchmouse_loglevel level);
 
 // Device enumeration/open/close/free
 TOUCHMOUSEAPI touchmouse_device_info* touchmouse_enumerate_devices(void);
