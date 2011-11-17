@@ -2,13 +2,15 @@
 #define __LIBTOUCHMOUSE_H__
 #include <stdint.h>
 
-// Win32 needs symbols exported.
 #ifndef _WIN32
+	/// Win32 needs symbols exported.
 	#define TOUCHMOUSEAPI
 #else
 	#ifdef __cplusplus
+		/// Win32 needs symbols exported.
 		#define TOUCHMOUSEAPI extern "C" __declspec(dllexport)
 	#else
+		/// Win32 needs symbols exported.
 		#define TOUCHMOUSEAPI __declspec(dllexport)
 	#endif
 #endif
